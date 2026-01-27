@@ -136,7 +136,6 @@ mkdir -p /usr/local/etc/xray/templates
 cp config/*.template.json /usr/local/etc/xray/templates/
 echo "Templates updated at /usr/local/etc/xray/templates/"
 
-
 # 6. Caddy Configuration
 echo -e "${GREEN}[6/7] Configuration Caddyfile...${NC}"
 
@@ -146,8 +145,23 @@ LE_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 TLS_CONFIG=""
 
 if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
-    echo "Found existing Certbot certificates. configuring Caddy to reuse them."
+    echo "Found existing Certbot certificates. usage: Direct."
     TLS_CONFIG="tls $LE_CERT $LE_KEY"
+    
+    # 1. Update Xray TCP Template to use these paths directly
+    # We replace the default /etc/ssl/agent paths with the Let's Encrypt paths
+    sed -i "s|/etc/ssl/agent/svc.plus.pem|${LE_CERT}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+    sed -i "s|/etc/ssl/agent/svc.plus.key|${LE_KEY}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+    echo "Updated Xray TCP template to use Certbot paths directly."
+    
+    # 2. Fix Permissions so 'nobody' (Xray) can read them
+    # Directories need search (x) permission, files need read (r)
+    echo "Adjusting permissions for /etc/letsencrypt to allow Xray access..."
+    chmod 755 /etc/letsencrypt
+    chmod 755 /etc/letsencrypt/live
+    chmod 755 /etc/letsencrypt/archive
+    chmod -R +r /etc/letsencrypt/archive/${DOMAIN}
+    chmod -R +r /etc/letsencrypt/live/${DOMAIN}
 fi
 
 cat > /etc/caddy/Caddyfile <<EOF
