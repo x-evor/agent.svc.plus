@@ -157,21 +157,16 @@ echo -e "${GREEN}[6/7] Configuration Caddyfile...${NC}"
 LE_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 LE_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 TLS_CONFIG=""
+XRAY_CERT="/etc/ssl/agent/svc.plus.pem"
+XRAY_KEY="/etc/ssl/agent/svc.plus.key"
 
 if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
     echo "Found existing Certbot certificates. usage: Direct."
     TLS_CONFIG="tls $LE_CERT $LE_KEY"
+    XRAY_CERT="$LE_CERT"
+    XRAY_KEY="$LE_KEY"
     
-    # 1. Update Xray TCP Template to use these paths directly
-    sed -i "s|/etc/ssl/agent/svc.plus.pem|${LE_CERT}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
-    sed -i "s|/etc/ssl/agent/svc.plus.key|${LE_KEY}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
-    echo "Updated Xray TCP template to use Certbot paths directly."
-    
-    # 2. Force initialization of tcp-config.json
-    cp /usr/local/etc/xray/templates/xray.tcp.template.json /usr/local/etc/xray/tcp-config.json
-    chown nobody:nogroup /usr/local/etc/xray/tcp-config.json
-    
-    # 3. Fix Permissions
+    # Fix Permissions
     echo "Adjusting permissions for /etc/letsencrypt to allow Xray access..."
     chmod 755 /etc/letsencrypt
     chmod 755 /etc/letsencrypt/live
@@ -181,6 +176,13 @@ if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
 else
     echo "No existing Certbot certificates found at $LE_CERT. Will rely on Caddy auto-issuance."
 fi
+
+# Ensure Xray TCP template + config always match the chosen cert paths
+sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1${XRAY_CERT}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1${XRAY_KEY}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+cp /usr/local/etc/xray/templates/xray.tcp.template.json /usr/local/etc/xray/tcp-config.json
+chown nobody:nogroup /usr/local/etc/xray/tcp-config.json
+echo "Updated Xray TCP template/config to use: ${XRAY_CERT}"
 
 cat > /etc/caddy/Caddyfile <<EOF
 ${DOMAIN}:443 {
@@ -220,6 +222,15 @@ TARGET_KEY="/etc/ssl/agent/svc.plus.key"
 LE_CERT="/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem"
 LE_KEY="/etc/letsencrypt/live/\${DOMAIN}/privkey.pem"
 
+update_xray_config() {
+    local crt="\$1"
+    local key="\$2"
+    sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${crt}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+    sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${key}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
+    sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${crt}\\2|g" /usr/local/etc/xray/tcp-config.json
+    sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${key}\\2|g" /usr/local/etc/xray/tcp-config.json
+}
+
 if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
     echo "Found Certbot certificates at \$LE_CERT"
     # If using Certbot, we might assume Xray is already configured to point there directly (via init script).
@@ -227,6 +238,8 @@ if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
     echo "Copying to agent dir as fallback..."
     cp "\$LE_CERT" "\$TARGET_CRT"
     cp "\$LE_KEY" "\$TARGET_KEY"
+    SOURCE_CRT="\$LE_CERT"
+    SOURCE_KEY="\$LE_KEY"
 else
     # Priority 2: Caddy Internal Storage
     SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
@@ -260,8 +273,10 @@ fi
 
 if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
     echo "Found certificate at: \$SOURCE_CRT"
+    # Keep /etc/ssl/agent as a fallback copy, but point Xray to the real source.
     cp "\$SOURCE_CRT" "\$TARGET_CRT"
     cp "\$SOURCE_KEY" "\$TARGET_KEY"
+    update_xray_config "\$SOURCE_CRT" "\$SOURCE_KEY"
     
     chown nobody:nogroup /etc/ssl/agent/svc.plus.*
     chmod 644 "\$TARGET_CRT"
@@ -285,6 +300,7 @@ fuser -k 443/tcp || true
 # Stop legacy services if known
 systemctl stop nginx || true
 systemctl stop apache2 || true
+systemctl stop caddy || true
 
 # Permissions for config dir
 mkdir -p /usr/local/etc/xray
