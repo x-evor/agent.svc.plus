@@ -83,11 +83,25 @@ if ! command -v xcaddy &> /dev/null; then
 fi
 
 # Build Caddy
-if ! command -v caddy &> /dev/null; then
+# Function to compare versions
+version_lt() { test "$(echo "$@" | tr " " "\n" | sort -rV | head -n 1)" != "$1"; }
+
+INSTALLED_CADDY_VER="0.0.0"
+if command -v caddy &> /dev/null; then
+    INSTALLED_CADDY_VER=$(caddy version | awk '{print $1}' | sed 's/v//')
+fi
+
+REQUIRED_VER="2.8.0"
+echo "Installed Caddy Version: $INSTALLED_CADDY_VER"
+
+if version_lt "$INSTALLED_CADDY_VER" "$REQUIRED_VER"; then
+    echo -e "${YELLOW}Caddy is missing or older than v${REQUIRED_VER}. Building/Upgrading...${NC}"
     xcaddy build \
         --with github.com/caddy-dns/cloudflare \
         --with github.com/caddy-dns/alidns \
         --output /usr/bin/caddy
+else
+    echo -e "${GREEN}Caddy is up to date (v$INSTALLED_CADDY_VER). Skipping build.${NC}"
 fi
 
 caddy version
