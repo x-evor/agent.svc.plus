@@ -36,10 +36,42 @@ bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release
 # 3. Go & Caddy Installation
 echo -e "${GREEN}[3/7] Installing Go and building Caddy with DNS plugins...${NC}"
 
+# 3. Go & Caddy Installation
+echo -e "${GREEN}[3/7] Installing Go and building Caddy with DNS plugins...${NC}"
+
 # Install Go
 if ! command -v go &> /dev/null; then
-    wget https://go.dev/dl/go1.23.4.linux-amd64.tar.gz -O /tmp/go.tar.gz
-    rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz
+    GO_VER="1.23.4"
+    GO_FILE="go${GO_VER}.linux-amd64.tar.gz"
+    GO_URL="https://go.dev/dl/${GO_FILE}"
+    LOCAL_TAR="/tmp/${GO_FILE}"
+    
+    NEED_DOWNLOAD=true
+    
+    if [ -f "$LOCAL_TAR" ]; then
+        echo "Found cached Go tarball at $LOCAL_TAR"
+        echo "Verifying checksum..."
+        # Fetch expected SHA256
+        REMOTE_SHA256=$(curl -sL "${GO_URL}.sha256")
+        if [ -n "$REMOTE_SHA256" ]; then
+            LOCAL_SHA256=$(sha256sum "$LOCAL_TAR" | awk '{print $1}')
+            if [ "$LOCAL_SHA256" == "$REMOTE_SHA256" ]; then
+                echo -e "${GREEN}Checksum verified. Skipping download.${NC}"
+                NEED_DOWNLOAD=false
+            else
+                echo -e "${YELLOW}Checksum mismatch (Local: $LOCAL_SHA256, Remote: $REMOTE_SHA256). Re-downloading...${NC}"
+            fi
+        else
+            echo "Could not fetch remote checksum. Proceeding with existing file."
+            NEED_DOWNLOAD=false
+        fi
+    fi
+
+    if [ "$NEED_DOWNLOAD" = true ]; then
+        wget "$GO_URL" -O "$LOCAL_TAR"
+    fi
+    
+    rm -rf /usr/local/go && tar -C /usr/local -xzf "$LOCAL_TAR"
     export PATH=$PATH:/usr/local/go/bin
 fi
 go version
