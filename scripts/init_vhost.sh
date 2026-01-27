@@ -227,6 +227,25 @@ if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
     systemctl restart xray-tcp || true
 else
     echo "TIMED OUT: Could not find certificate for \${DOMAIN} in search paths: \${SEARCH_PATHS}"
+    
+    echo "--- DIAGNOSTICS ---"
+    echo "1. Caddy Service Status:"
+    systemctl status caddy --no-pager | head -n 5
+    
+    echo -e "\n2. Caddy Certificate Data Directory:"
+    caddy environ | grep -i data
+    
+    echo -e "\n3. Domain Resolution (getent hosts):"
+    getent hosts "\${DOMAIN}" || echo "Failed to resolve \${DOMAIN}"
+    
+    echo -e "\n4. Last 20 lines of Caddy Log:"
+    if journalctl -u caddy --no-pager >/dev/null 2>&1; then
+        journalctl -u caddy --no-pager | tail -n 20
+    else
+        tail -n 20 /var/log/caddy.log 2>/dev/null || echo "No logs found."
+    fi
+    echo "-------------------"
+    
     exit 1
 fi
 EOF
