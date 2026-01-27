@@ -7,7 +7,11 @@
             "listen": "/dev/shm/xray.sock,0666",
             "protocol": "vless",
             "settings": {
-                "clients": [],
+                "clients": [
+                    {
+                        "id": "{{ UUID }}"
+                    }
+                ],
                 "decryption": "none"
             },
             "streamSettings": {
