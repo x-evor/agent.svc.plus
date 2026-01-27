@@ -279,36 +279,8 @@ echo -e "${GREEN}[7/7] Installing Systemd Services...${NC}"
 mkdir -p /usr/local/etc/xray
 chown -R nobody:nogroup /usr/local/etc/xray
 
-# Add a timer to sync certs regularly (optional, but good for renewals)
-cat > /etc/systemd/system/agent-cert-sync.service <<EOF
-[Unit]
-Description=Sync Caddy Certificates for Xray Agent
-After=caddy.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/sync-agent-certs
-TimeoutStartSec=300
-EOF
-
-cat > /etc/systemd/system/agent-cert-sync.timer <<EOF
-[Unit]
-Description=Daily Sync of Caddy Certificates
-
-[Timer]
-OnBootSec=1m
-OnUnitActiveSec=1d
-
-[Install]
-WantedBy=timers.target
-EOF
-
-systemctl daemon-reload
-systemctl enable agent-cert-sync.timer
-systemctl start agent-cert-sync.timer
-
-# Attempt immediate sync (backgrounded so it doesn't block if retrying)
-/usr/local/bin/sync-agent-certs &
+# Attempt immediate sync
+/usr/local/bin/sync-agent-certs || true
 
 # Xray Service (XHTTP/Default)
 cat > /etc/systemd/system/xray.service <<EOF
