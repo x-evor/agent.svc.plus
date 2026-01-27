@@ -27,7 +27,7 @@ echo -e "${GREEN}Using domain: ${DOMAIN}${NC}"
 
 # 1. System Update & Dependencies
 echo -e "${GREEN}[1/7] Updating system and installing dependencies...${NC}"
-apt-get update && apt-get install -y curl wget git socat build-essential debian-keyring debian-archive-keyring apt-transport-https
+apt-get update && apt-get install -y curl wget git socat build-essential debian-keyring debian-archive-keyring apt-transport-https dnsutils
 
 # 2. Xray Installation
 echo -e "${GREEN}[2/7] Installing Xray...${NC}"
