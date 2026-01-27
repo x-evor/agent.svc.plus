@@ -163,25 +163,23 @@ if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
     TLS_CONFIG="tls $LE_CERT $LE_KEY"
     
     # 1. Update Xray TCP Template to use these paths directly
-    # We replace the default /etc/ssl/agent paths with the Let's Encrypt paths
     sed -i "s|/etc/ssl/agent/svc.plus.pem|${LE_CERT}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
     sed -i "s|/etc/ssl/agent/svc.plus.key|${LE_KEY}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
     echo "Updated Xray TCP template to use Certbot paths directly."
     
-    # 2. Force initialization of tcp-config.json from the patched template
-    # This guarantees the file on disk matches the Certbot paths immediately
+    # 2. Force initialization of tcp-config.json
     cp /usr/local/etc/xray/templates/xray.tcp.template.json /usr/local/etc/xray/tcp-config.json
     chown nobody:nogroup /usr/local/etc/xray/tcp-config.json
-    echo "Initialized /usr/local/etc/xray/tcp-config.json from patched template."
     
-    # 3. Fix Permissions so 'nobody' (Xray) can read them
-    # Directories need search (x) permission, files need read (r)
+    # 3. Fix Permissions
     echo "Adjusting permissions for /etc/letsencrypt to allow Xray access..."
     chmod 755 /etc/letsencrypt
     chmod 755 /etc/letsencrypt/live
     chmod 755 /etc/letsencrypt/archive
     chmod -R +r /etc/letsencrypt/archive/${DOMAIN}
     chmod -R +r /etc/letsencrypt/live/${DOMAIN}
+else
+    echo "No existing Certbot certificates found at $LE_CERT. Will rely on Caddy auto-issuance."
 fi
 
 cat > /etc/caddy/Caddyfile <<EOF
@@ -224,11 +222,13 @@ LE_KEY="/etc/letsencrypt/live/\${DOMAIN}/privkey.pem"
 
 if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
     echo "Found Certbot certificates at \$LE_CERT"
-    SOURCE_CRT="\$LE_CERT"
-    SOURCE_KEY="\$LE_KEY"
+    # If using Certbot, we might assume Xray is already configured to point there directly (via init script).
+    # But if Xray is expecting /etc/ssl/agent/svc.plus.pem (default config), we should symlink or copy them here too as a fallback.
+    echo "Copying to agent dir as fallback..."
+    cp "\$LE_CERT" "\$TARGET_CRT"
+    cp "\$LE_KEY" "\$TARGET_KEY"
 else
     # Priority 2: Caddy Internal Storage
-    # Directories to search for Caddy data
     SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
 
     echo "Starting search for Caddy certificates..."
@@ -238,24 +238,21 @@ else
     SLEEP_SEC=2
 
     for ((i=1; i<=MAX_RETRIES; i++)); do
-        # Attempt to find the certificate
         for DIR in \${SEARCH_PATHS}; do
             if [ -d "\$DIR" ]; then
                 # Find closest match file named exactly \${DOMAIN}.crt
                 FOUND_CRT=\$(find "\$DIR" -name "\${DOMAIN}.crt" 2>/dev/null | head -n 1)
                 
                 if [ -n "\$FOUND_CRT" ]; then
-                    # Check if corresponding key exists
                     FOUND_KEY="\${FOUND_CRT%.crt}.key"
                     if [ -f "\$FOUND_KEY" ]; then
                         SOURCE_CRT="\$FOUND_CRT"
                         SOURCE_KEY="\$FOUND_KEY"
-                        break 2 # Break both loops found
+                        break 2
                     fi
                 fi
             fi
         done
-        
         echo "Attempt \$i/\$MAX_RETRIES: Certificate not found yet. Waiting \$SLEEP_SEC seconds..."
         sleep \$SLEEP_SEC
     done
@@ -263,44 +260,16 @@ fi
 
 if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
     echo "Found certificate at: \$SOURCE_CRT"
-    
-    # Check if we should link or copy. 
-    # If it's Certbot, we might want to copy to avoid permission issues with Xray (nobody user) reading /etc/letsencrypt/live
-    # Copying is safer for permissions.
-    
     cp "\$SOURCE_CRT" "\$TARGET_CRT"
     cp "\$SOURCE_KEY" "\$TARGET_KEY"
     
-    # Permissions for 'nobody' user (Xray)
     chown nobody:nogroup /etc/ssl/agent/svc.plus.*
     chmod 644 "\$TARGET_CRT"
     chmod 600 "\$TARGET_KEY"
-    
     echo "Certificates successfully synced to /etc/ssl/agent/"
-    
-    # Reload/Restart Xray TCP if running
     systemctl restart xray-tcp || true
 else
-    echo "TIMED OUT: Could not find certificate for \${DOMAIN} in search paths: \${SEARCH_PATHS}"
-    
-    echo "--- DIAGNOSTICS ---"
-    echo "1. Caddy Service Status:"
-    systemctl status caddy --no-pager | head -n 5
-    
-    echo -e "\n2. Caddy Certificate Data Directory:"
-    caddy environ | grep -i data
-    
-    echo -e "\n3. Domain Resolution (getent hosts):"
-    getent hosts "\${DOMAIN}" || echo "Failed to resolve \${DOMAIN}"
-    
-    echo -e "\n4. Last 20 lines of Caddy Log:"
-    if journalctl -u caddy --no-pager >/dev/null 2>&1; then
-        journalctl -u caddy --no-pager | tail -n 20
-    else
-        tail -n 20 /var/log/caddy.log 2>/dev/null || echo "No logs found."
-    fi
-    echo "-------------------"
-    
+    echo "TIMED OUT: Could not find certificate for \${DOMAIN}"
     exit 1
 fi
 EOF
@@ -308,6 +277,14 @@ chmod +x /usr/local/bin/sync-agent-certs
 
 # 7. Systemd Services
 echo -e "${GREEN}[7/7] Installing Systemd Services...${NC}"
+
+# Kill conflicting processes on 80/443
+echo "Checking for port conflicts..."
+fuser -k 80/tcp || true
+fuser -k 443/tcp || true
+# Stop legacy services if known
+systemctl stop nginx || true
+systemctl stop apache2 || true
 
 # Permissions for config dir
 mkdir -p /usr/local/etc/xray
