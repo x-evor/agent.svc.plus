@@ -1,0 +1,7 @@
+"ssh-manager": {
+  "command": "npx",
+  "args": ["-y", "mcp-ssh-manager"],
+  "env": {
+    "DOTENV_CONFIG_PATH": "../.env.ssh"
+  }
+}
