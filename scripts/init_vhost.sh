@@ -242,7 +242,7 @@ if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
     SOURCE_KEY="\$LE_KEY"
 else
     # Priority 2: Caddy Internal Storage
-    SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
+    SEARCH_PATHS="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN} /var/lib/caddy /root /etc/caddy /usr/share/caddy"
 
     echo "Starting search for Caddy certificates..."
 
