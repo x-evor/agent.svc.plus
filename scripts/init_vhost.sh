@@ -99,7 +99,9 @@ ${DOMAIN}:443 {
 
     handle @grpc {
         reverse_proxy unix//dev/shm/xray.sock {
-             transport h2c
+             transport http {
+                 versions h2c 2
+             }
         }
     }
 
@@ -108,8 +110,61 @@ ${DOMAIN}:443 {
 }
 EOF
 
+# Help script for syncing certificates
+cat > /usr/local/bin/sync-agent-certs <<EOF
+#!/bin/bash
+# Syncs certificates from Caddy to Agent folder
+DOMAIN="${DOMAIN}"
+CADDY_CERT_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN}"
+
+# Fallback to ZeroSSL if Let's Encrypt isn't found
+if [ ! -d "\$CADDY_CERT_DIR" ]; then
+    CADDY_CERT_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme.zerossl.com-v2.dv.90.file/\${DOMAIN}"
+fi
+
+if [ -d "\$CADDY_CERT_DIR" ]; then
+    cp "\$CADDY_CERT_DIR/\${DOMAIN}.crt" /etc/ssl/agent/svc.plus.pem
+    cp "\$CADDY_CERT_DIR/\${DOMAIN}.key" /etc/ssl/agent/svc.plus.key
+    chown nobody:nogroup /etc/ssl/agent/svc.plus.*
+    chmod 644 /etc/ssl/agent/svc.plus.pem
+    chmod 600 /etc/ssl/agent/svc.plus.key
+    echo "Certificates synced from Caddy."
+    systemctl restart xray-tcp
+else
+    echo "Certificates not found yet in Caddy storage."
+fi
+EOF
+chmod +x /usr/local/bin/sync-agent-certs
+
 # 7. Systemd Services
 echo -e "${GREEN}[7/7] Installing Systemd Services...${NC}"
+
+# Add a timer to sync certs regularly (optional, but good for renewals)
+cat > /etc/systemd/system/agent-cert-sync.service <<EOF
+[Unit]
+Description=Sync Caddy Certificates for Xray Agent
+After=caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sync-agent-certs
+EOF
+
+cat > /etc/systemd/system/agent-cert-sync.timer <<EOF
+[Unit]
+Description=Daily Sync of Caddy Certificates
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=1d
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable agent-cert-sync.timer
+systemctl start agent-cert-sync.timer
 
 # Xray Service (XHTTP/Default)
 cat > /etc/systemd/system/xray.service <<EOF
