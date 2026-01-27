@@ -68,25 +68,41 @@ mkdir -p /etc/ssl/agent
 mkdir -p /etc/agent
 
 # 5. Agent Installation
-echo -e "${GREEN}[5/7] Installing Agent Service...${NC}"
-git clone https://github.com/cloud-neutral-toolkit/agent.svc.plus.git /opt/agent.svc.plus || (cd /opt/agent.svc.plus && git pull)
-cd /opt/agent.svc.plus
+echo -e "${GREEN}[5/7] Installing/Updating Agent Service...${NC}"
+
+AGENT_DIR="/opt/agent.svc.plus"
+
+if [ -d "$AGENT_DIR" ]; then
+    echo "Updating existing agent repository..."
+    cd "$AGENT_DIR"
+    git fetch origin
+    git reset --hard origin/main
+else
+    git clone https://github.com/cloud-neutral-toolkit/agent.svc.plus.git "$AGENT_DIR"
+    cd "$AGENT_DIR"
+fi
+
+# Build
+echo "Building Agent binary..."
 go mod tidy
 go build -o /usr/local/bin/agent-svc-plus ./cmd/agent
 
-# Copy default config if not exists
+# Copy default config if not exists, but don't overwrite user config
+mkdir -p /etc/agent
 if [ ! -f /etc/agent/account-agent.yaml ]; then
+    echo "Initializing new configuration file..."
     cp account-agent.yaml /etc/agent/account-agent.yaml
+    # Initial path setup for templates in the new config
+    sed -i 's|config/xray.xhttp.template.json|/usr/local/etc/xray/templates/xray.xhttp.template.json|g' /etc/agent/account-agent.yaml
+    sed -i 's|config/xray.tcp.template.json|/usr/local/etc/xray/templates/xray.tcp.template.json|g' /etc/agent/account-agent.yaml
+else
+    echo "Configuration file exists at /etc/agent/account-agent.yaml, skipping overwrite."
 fi
 
-# Copy templates
+# Always update templates
 mkdir -p /usr/local/etc/xray/templates
 cp config/*.template.json /usr/local/etc/xray/templates/
-
-# Update config to point to templates (simple sed if needed, or rely on user to edit)
-# For now we assume the default config matches or we adjust the copied config
-sed -i 's|config/xray.xhttp.template.json|/usr/local/etc/xray/templates/xray.xhttp.template.json|g' /etc/agent/account-agent.yaml
-sed -i 's|config/xray.tcp.template.json|/usr/local/etc/xray/templates/xray.tcp.template.json|g' /etc/agent/account-agent.yaml
+echo "Templates updated at /usr/local/etc/xray/templates/"
 
 
 # 6. Caddy Configuration
