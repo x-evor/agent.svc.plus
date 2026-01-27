@@ -162,30 +162,65 @@ EOF
 cat > /usr/local/bin/sync-agent-certs <<EOF
 #!/bin/bash
 # Syncs certificates from Caddy to Agent folder
-DOMAIN="${DOMAIN}"
-CADDY_CERT_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN}"
 
-# Fallback to ZeroSSL if Let's Encrypt isn't found
-if [ ! -d "\$CADDY_CERT_DIR" ]; then
-    CADDY_CERT_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme.zerossl.com-v2.dv.90.file/\${DOMAIN}"
+# Ensure destination directory exists and is accessible
+mkdir -p /etc/ssl/agent
+chmod 755 /etc/ssl/agent
+
+DOMAIN="${DOMAIN}"
+CADDY_DATA_DIR="/var/lib/caddy/.local/share/caddy"
+LE_DIR="\${CADDY_DATA_DIR}/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN}"
+ZS_DIR="\${CADDY_DATA_DIR}/certificates/acme.zerossl.com-v2.dv.90.file/\${DOMAIN}"
+
+SOURCE_CRT=""
+SOURCE_KEY=""
+
+if [ -f "\${LE_DIR}/\${DOMAIN}.crt" ]; then
+    SOURCE_CRT="\${LE_DIR}/\${DOMAIN}.crt"
+    SOURCE_KEY="\${LE_DIR}/\${DOMAIN}.key"
+    echo "Found Let's Encrypt certificate."
+elif [ -f "\${ZS_DIR}/\${DOMAIN}.crt" ]; then
+    SOURCE_CRT="\${ZS_DIR}/\${DOMAIN}.crt"
+    SOURCE_KEY="\${ZS_DIR}/\${DOMAIN}.key"
+    echo "Found ZeroSSL certificate."
+else
+    # Fallback: Search for any CRT matching the domain in caddy storage
+    FOUND=\$(find "\${CADDY_DATA_DIR}" -name "\${DOMAIN}.crt" | head -n 1)
+    if [ -n "\$FOUND" ]; then
+        SOURCE_CRT="\$FOUND"
+        SOURCE_KEY="\${FOUND%.crt}.key"
+        echo "Found certificate via search: \$SOURCE_CRT"
+    fi
 fi
 
-if [ -d "\$CADDY_CERT_DIR" ]; then
-    cp "\$CADDY_CERT_DIR/\${DOMAIN}.crt" /etc/ssl/agent/svc.plus.pem
-    cp "\$CADDY_CERT_DIR/\${DOMAIN}.key" /etc/ssl/agent/svc.plus.key
+if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
+    cp "\$SOURCE_CRT" /etc/ssl/agent/svc.plus.pem
+    cp "\$SOURCE_KEY" /etc/ssl/agent/svc.plus.key
+    
+    # Permissions for 'nobody' user (Xray)
     chown nobody:nogroup /etc/ssl/agent/svc.plus.*
     chmod 644 /etc/ssl/agent/svc.plus.pem
     chmod 600 /etc/ssl/agent/svc.plus.key
-    echo "Certificates synced from Caddy."
-    systemctl restart xray-tcp
+    
+    echo "Certificates synced to /etc/ssl/agent/ for domain \${DOMAIN}."
+    
+    # Reload/Restart Xray TCP if running
+    systemctl restart xray-tcp || true
 else
-    echo "Certificates not found yet in Caddy storage."
+    echo "Certificates for \${DOMAIN} not found yet in Caddy storage."
+    echo "Searched:"
+    echo " - \$LE_DIR"
+    echo " - \$ZS_DIR"
 fi
 EOF
 chmod +x /usr/local/bin/sync-agent-certs
 
 # 7. Systemd Services
 echo -e "${GREEN}[7/7] Installing Systemd Services...${NC}"
+
+# Permissions for config dir
+mkdir -p /usr/local/etc/xray
+chown -R nobody:nogroup /usr/local/etc/xray
 
 # Add a timer to sync certs regularly (optional, but good for renewals)
 cat > /etc/systemd/system/agent-cert-sync.service <<EOF
@@ -203,7 +238,7 @@ cat > /etc/systemd/system/agent-cert-sync.timer <<EOF
 Description=Daily Sync of Caddy Certificates
 
 [Timer]
-OnBootSec=5m
+OnBootSec=2m
 OnUnitActiveSec=1d
 
 [Install]
@@ -213,6 +248,9 @@ EOF
 systemctl daemon-reload
 systemctl enable agent-cert-sync.timer
 systemctl start agent-cert-sync.timer
+
+# Attempt immediate sync (might fail if Caddy hasn't issued yet, but worth a try)
+/usr/local/bin/sync-agent-certs || true
 
 # Xray Service (XHTTP/Default)
 cat > /etc/systemd/system/xray.service <<EOF
