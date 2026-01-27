@@ -168,49 +168,66 @@ mkdir -p /etc/ssl/agent
 chmod 755 /etc/ssl/agent
 
 DOMAIN="${DOMAIN}"
-CADDY_DATA_DIR="/var/lib/caddy/.local/share/caddy"
-LE_DIR="\${CADDY_DATA_DIR}/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN}"
-ZS_DIR="\${CADDY_DATA_DIR}/certificates/acme.zerossl.com-v2.dv.90.file/\${DOMAIN}"
+TARGET_CRT="/etc/ssl/agent/svc.plus.pem"
+TARGET_KEY="/etc/ssl/agent/svc.plus.key"
 
-SOURCE_CRT=""
-SOURCE_KEY=""
+# Directories to search for Caddy data
+# 1. Standard package install (User=caddy, Home=/var/lib/caddy)
+# 2. Root install (User=root, Home=/root)
+# 3. Custom/Other
+SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
 
-if [ -f "\${LE_DIR}/\${DOMAIN}.crt" ]; then
-    SOURCE_CRT="\${LE_DIR}/\${DOMAIN}.crt"
-    SOURCE_KEY="\${LE_DIR}/\${DOMAIN}.key"
-    echo "Found Let's Encrypt certificate."
-elif [ -f "\${ZS_DIR}/\${DOMAIN}.crt" ]; then
-    SOURCE_CRT="\${ZS_DIR}/\${DOMAIN}.crt"
-    SOURCE_KEY="\${ZS_DIR}/\${DOMAIN}.key"
-    echo "Found ZeroSSL certificate."
-else
-    # Fallback: Search for any CRT matching the domain in caddy storage
-    FOUND=\$(find "\${CADDY_DATA_DIR}" -name "\${DOMAIN}.crt" | head -n 1)
-    if [ -n "\$FOUND" ]; then
-        SOURCE_CRT="\$FOUND"
-        SOURCE_KEY="\${FOUND%.crt}.key"
-        echo "Found certificate via search: \$SOURCE_CRT"
-    fi
-fi
+echo "Starting certificate sync for domain: \${DOMAIN}"
+
+# Retry loop (ACME issuing takes time)
+MAX_RETRIES=30
+SLEEP_SEC=2
+
+for ((i=1; i<=MAX_RETRIES; i++)); do
+    SOURCE_CRT=""
+    SOURCE_KEY=""
+    
+    # Attempt to find the certificate
+    for DIR in \${SEARCH_PATHS}; do
+        if [ -d "\$DIR" ]; then
+            # Find closest match file named exactly \${DOMAIN}.crt
+            # Use 'find' to handle deep directory structures in .local/share/caddy/...
+            FOUND_CRT=\$(find "\$DIR" -name "\${DOMAIN}.crt" 2>/dev/null | head -n 1)
+            
+            if [ -n "\$FOUND_CRT" ]; then
+                # Check if corresponding key exists
+                FOUND_KEY="\${FOUND_CRT%.crt}.key"
+                if [ -f "\$FOUND_KEY" ]; then
+                    SOURCE_CRT="\$FOUND_CRT"
+                    SOURCE_KEY="\$FOUND_KEY"
+                    break 2 # Break both loops found
+                fi
+            fi
+        fi
+    done
+    
+    echo "Attempt \$i/\$MAX_RETRIES: Certificate not found yet. Waiting \$SLEEP_SEC seconds..."
+    sleep \$SLEEP_SEC
+done
 
 if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
-    cp "\$SOURCE_CRT" /etc/ssl/agent/svc.plus.pem
-    cp "\$SOURCE_KEY" /etc/ssl/agent/svc.plus.key
+    echo "Found certificate at: \$SOURCE_CRT"
+    
+    cp "\$SOURCE_CRT" "\$TARGET_CRT"
+    cp "\$SOURCE_KEY" "\$TARGET_KEY"
     
     # Permissions for 'nobody' user (Xray)
     chown nobody:nogroup /etc/ssl/agent/svc.plus.*
-    chmod 644 /etc/ssl/agent/svc.plus.pem
-    chmod 600 /etc/ssl/agent/svc.plus.key
+    chmod 644 "\$TARGET_CRT"
+    chmod 600 "\$TARGET_KEY"
     
-    echo "Certificates synced to /etc/ssl/agent/ for domain \${DOMAIN}."
+    echo "Certificates successfully synced to /etc/ssl/agent/"
     
     # Reload/Restart Xray TCP if running
     systemctl restart xray-tcp || true
 else
-    echo "Certificates for \${DOMAIN} not found yet in Caddy storage."
-    echo "Searched:"
-    echo " - \$LE_DIR"
-    echo " - \$ZS_DIR"
+    echo "TIMED OUT: Could not find certificate for \${DOMAIN} in search paths: \${SEARCH_PATHS}"
+    exit 1
 fi
 EOF
 chmod +x /usr/local/bin/sync-agent-certs
@@ -231,6 +248,7 @@ After=caddy.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/sync-agent-certs
+TimeoutStartSec=300
 EOF
 
 cat > /etc/systemd/system/agent-cert-sync.timer <<EOF
@@ -238,7 +256,7 @@ cat > /etc/systemd/system/agent-cert-sync.timer <<EOF
 Description=Daily Sync of Caddy Certificates
 
 [Timer]
-OnBootSec=2m
+OnBootSec=1m
 OnUnitActiveSec=1d
 
 [Install]
@@ -249,8 +267,8 @@ systemctl daemon-reload
 systemctl enable agent-cert-sync.timer
 systemctl start agent-cert-sync.timer
 
-# Attempt immediate sync (might fail if Caddy hasn't issued yet, but worth a try)
-/usr/local/bin/sync-agent-certs || true
+# Attempt immediate sync (backgrounded so it doesn't block if retrying)
+/usr/local/bin/sync-agent-certs &
 
 # Xray Service (XHTTP/Default)
 cat > /etc/systemd/system/xray.service <<EOF
