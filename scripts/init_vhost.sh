@@ -154,7 +154,13 @@ if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
     sed -i "s|/etc/ssl/agent/svc.plus.key|${LE_KEY}|g" /usr/local/etc/xray/templates/xray.tcp.template.json
     echo "Updated Xray TCP template to use Certbot paths directly."
     
-    # 2. Fix Permissions so 'nobody' (Xray) can read them
+    # 2. Force initialization of tcp-config.json from the patched template
+    # This guarantees the file on disk matches the Certbot paths immediately
+    cp /usr/local/etc/xray/templates/xray.tcp.template.json /usr/local/etc/xray/tcp-config.json
+    chown nobody:nogroup /usr/local/etc/xray/tcp-config.json
+    echo "Initialized /usr/local/etc/xray/tcp-config.json from patched template."
+    
+    # 3. Fix Permissions so 'nobody' (Xray) can read them
     # Directories need search (x) permission, files need read (r)
     echo "Adjusting permissions for /etc/letsencrypt to allow Xray access..."
     chmod 755 /etc/letsencrypt
