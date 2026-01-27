@@ -139,8 +139,21 @@ echo "Templates updated at /usr/local/etc/xray/templates/"
 
 # 6. Caddy Configuration
 echo -e "${GREEN}[6/7] Configuration Caddyfile...${NC}"
+
+# Check for existing Certbot certificates to reuse
+LE_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+LE_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+TLS_CONFIG=""
+
+if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
+    echo "Found existing Certbot certificates. configuring Caddy to reuse them."
+    TLS_CONFIG="tls $LE_CERT $LE_KEY"
+fi
+
 cat > /etc/caddy/Caddyfile <<EOF
 ${DOMAIN}:443 {
+    ${TLS_CONFIG}
+    
     @grpc {
         path /split/*
     }
@@ -161,7 +174,7 @@ EOF
 # Help script for syncing certificates
 cat > /usr/local/bin/sync-agent-certs <<EOF
 #!/bin/bash
-# Syncs certificates from Caddy to Agent folder
+# Syncs certificates from Caddy or Certbot to Agent folder
 
 # Ensure destination directory exists and is accessible
 mkdir -p /etc/ssl/agent
@@ -171,47 +184,55 @@ DOMAIN="${DOMAIN}"
 TARGET_CRT="/etc/ssl/agent/svc.plus.pem"
 TARGET_KEY="/etc/ssl/agent/svc.plus.key"
 
-# Directories to search for Caddy data
-# 1. Standard package install (User=caddy, Home=/var/lib/caddy)
-# 2. Root install (User=root, Home=/root)
-# 3. Custom/Other
-SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
+# Priority 1: Certbot / Let's Encrypt Standard Path
+LE_CERT="/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem"
+LE_KEY="/etc/letsencrypt/live/\${DOMAIN}/privkey.pem"
 
-echo "Starting certificate sync for domain: \${DOMAIN}"
+if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
+    echo "Found Certbot certificates at \$LE_CERT"
+    SOURCE_CRT="\$LE_CERT"
+    SOURCE_KEY="\$LE_KEY"
+else
+    # Priority 2: Caddy Internal Storage
+    # Directories to search for Caddy data
+    SEARCH_PATHS="/var/lib/caddy /root /etc/caddy /usr/share/caddy"
 
-# Retry loop (ACME issuing takes time)
-MAX_RETRIES=30
-SLEEP_SEC=2
+    echo "Starting search for Caddy certificates..."
 
-for ((i=1; i<=MAX_RETRIES; i++)); do
-    SOURCE_CRT=""
-    SOURCE_KEY=""
-    
-    # Attempt to find the certificate
-    for DIR in \${SEARCH_PATHS}; do
-        if [ -d "\$DIR" ]; then
-            # Find closest match file named exactly \${DOMAIN}.crt
-            # Use 'find' to handle deep directory structures in .local/share/caddy/...
-            FOUND_CRT=\$(find "\$DIR" -name "\${DOMAIN}.crt" 2>/dev/null | head -n 1)
-            
-            if [ -n "\$FOUND_CRT" ]; then
-                # Check if corresponding key exists
-                FOUND_KEY="\${FOUND_CRT%.crt}.key"
-                if [ -f "\$FOUND_KEY" ]; then
-                    SOURCE_CRT="\$FOUND_CRT"
-                    SOURCE_KEY="\$FOUND_KEY"
-                    break 2 # Break both loops found
+    # Retry loop (ACME issuing takes time if not using pre-existing certs)
+    MAX_RETRIES=30
+    SLEEP_SEC=2
+
+    for ((i=1; i<=MAX_RETRIES; i++)); do
+        # Attempt to find the certificate
+        for DIR in \${SEARCH_PATHS}; do
+            if [ -d "\$DIR" ]; then
+                # Find closest match file named exactly \${DOMAIN}.crt
+                FOUND_CRT=\$(find "\$DIR" -name "\${DOMAIN}.crt" 2>/dev/null | head -n 1)
+                
+                if [ -n "\$FOUND_CRT" ]; then
+                    # Check if corresponding key exists
+                    FOUND_KEY="\${FOUND_CRT%.crt}.key"
+                    if [ -f "\$FOUND_KEY" ]; then
+                        SOURCE_CRT="\$FOUND_CRT"
+                        SOURCE_KEY="\$FOUND_KEY"
+                        break 2 # Break both loops found
+                    fi
                 fi
             fi
-        fi
+        done
+        
+        echo "Attempt \$i/\$MAX_RETRIES: Certificate not found yet. Waiting \$SLEEP_SEC seconds..."
+        sleep \$SLEEP_SEC
     done
-    
-    echo "Attempt \$i/\$MAX_RETRIES: Certificate not found yet. Waiting \$SLEEP_SEC seconds..."
-    sleep \$SLEEP_SEC
-done
+fi
 
 if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
     echo "Found certificate at: \$SOURCE_CRT"
+    
+    # Check if we should link or copy. 
+    # If it's Certbot, we might want to copy to avoid permission issues with Xray (nobody user) reading /etc/letsencrypt/live
+    # Copying is safer for permissions.
     
     cp "\$SOURCE_CRT" "\$TARGET_CRT"
     cp "\$SOURCE_KEY" "\$TARGET_KEY"
