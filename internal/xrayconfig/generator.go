@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 )
 
 const (
@@ -72,81 +73,165 @@ func (g Generator) Render(clients []Client) ([]byte, error) {
 		definition = DefaultDefinition()
 	}
 
-	root, err := definition.Base()
+	// 1. Render text/template first
+	baseMap, err := definition.Base()
 	if err != nil {
-		return nil, fmt.Errorf("load template: %w", err)
+		return nil, fmt.Errorf("load template base: %w", err)
 	}
 
-	if err := replaceClients(root, clients); err != nil {
+	// Re-marshal to bytes to apply template interpolation
+	rawBase, err := json.Marshal(baseMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal base template: %w", err)
+	}
+
+	// Prepare data for template
+	data := struct {
+		Domain string
+		UUID   string
+	}{
+		Domain: g.Domain,
+	}
+	if len(clients) > 0 {
+		data.UUID = clients[0].ID
+	}
+
+	// Execute Template
+	tmpl, err := template.New("xray").Parse(string(rawBase))
+	if err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
+	}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute template: %w", err)
+	}
+
+	// Unmarshal back to map to perform structural updates (clients list)
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(buf.String()), &root); err != nil {
+		return nil, fmt.Errorf("unmarshal rendered template: %w", err)
+	}
+
+	// 2. Structural updates (Inbounds & Outbounds clients/users)
+	if err := updateClients(root, clients); err != nil {
 		return nil, err
 	}
 
-	buf, err := json.MarshalIndent(root, "", "  ")
+	finalBuf, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
-	buf = append(buf, '\n')
-	return buf, nil
+	finalBuf = append(finalBuf, '\n')
+	return finalBuf, nil
 }
 
-func replaceClients(root map[string]interface{}, clients []Client) error {
-	inboundsValue, ok := root["inbounds"]
-	if !ok {
-		return errors.New("template missing inbounds array")
-	}
-
-	inboundsSlice, ok := inboundsValue.([]interface{})
-	if !ok {
-		return fmt.Errorf("template inbounds has unexpected type %T", inboundsValue)
-	}
-	if len(inboundsSlice) == 0 {
-		return errors.New("template missing inbound entry")
-	}
-
-	clientObjects := make([]interface{}, 0, len(clients))
-	for idx, client := range clients {
-		id := strings.TrimSpace(client.ID)
-		if id == "" {
-			return fmt.Errorf("client %d missing id", idx)
+func updateClients(root map[string]interface{}, clients []Client) error {
+	// 1. Update Inbounds (Server side)
+	if inboundsValue, ok := root["inbounds"]; ok {
+		if inboundsSlice, ok := inboundsValue.([]interface{}); ok && len(inboundsSlice) > 0 {
+			// Try to find the inbound with clients settings (VLESS/VMess)
+			// For backward compatibility and simplicity, we check the first one or loop?
+			// The original code only targeted index 0. Let's try to be smart but conservative.
+			// If index 0 has settings.clients, we update it.
+			if inbound, ok := inboundsSlice[0].(map[string]interface{}); ok {
+				if settings, ok := inbound["settings"].(map[string]interface{}); ok {
+					if _, ok := settings["clients"]; ok {
+						// Found it, update it
+						newClients := make([]interface{}, 0, len(clients))
+						for _, c := range clients {
+							entry := map[string]interface{}{"id": c.ID}
+							if c.Email != "" {
+								entry["email"] = c.Email
+							}
+							// Add flow if needed (for TCP vision), check streamSettings if possible or just add default?
+							// Original code conditionally added flow.
+							// But since we are reusing this for client config too, let's keep it simple.
+							// Check if network is xhttp to exclude flow?
+							includeFlow := true
+							if ss, ok := inbound["streamSettings"].(map[string]interface{}); ok {
+								if net, _ := ss["network"].(string); net == "xhttp" {
+									includeFlow = false
+								}
+							}
+							if includeFlow {
+								flow := c.Flow
+								if flow == "" {
+									flow = DefaultFlow
+								}
+								entry["flow"] = flow
+							}
+							newClients = append(newClients, entry)
+						}
+						settings["clients"] = newClients
+						inbound["settings"] = settings
+						inboundsSlice[0] = inbound // Assign back
+					}
+				}
+			}
+			root["inbounds"] = inboundsSlice
 		}
-		entry := map[string]interface{}{
-			"id": id,
-		}
-		if email := strings.TrimSpace(client.Email); email != "" {
-			entry["email"] = email
-		}
-		flow := strings.TrimSpace(client.Flow)
-		if flow == "" {
-			flow = DefaultFlow
-		}
-		entry["flow"] = flow
-		clientObjects = append(clientObjects, entry)
 	}
 
-	// Iterate over all inbounds to update clients everywhere
-	// This allows modifying multiple inbounds if they exist
-	// But typically we target the first one or ones with VLESS protocol
-	// For safety, let's only modify the first one as per original design,
-	// UNLESS we want to support multiple inbounds.
-	// The original code only modified inboundsSlice[0].
-
-	inbound := inboundsSlice[0].(map[string]interface{})
-
-	settingsValue, ok := inbound["settings"]
-	if !ok {
-		return errors.New("template inbound missing settings object")
+	// 2. Update Outbounds (Client side) - Search for VLESS protocol
+	if outboundsValue, ok := root["outbounds"]; ok {
+		if outboundsSlice, ok := outboundsValue.([]interface{}); ok {
+			updated := false
+			for i, out := range outboundsSlice {
+				outbound, ok := out.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				proto, _ := outbound["protocol"].(string)
+				if proto == "vless" {
+					if settings, ok := outbound["settings"].(map[string]interface{}); ok {
+						if vnext, ok := settings["vnext"].([]interface{}); ok {
+							for j, vn := range vnext {
+								vnextMap, ok := vn.(map[string]interface{})
+								if !ok {
+									continue
+								}
+								// Update users list in vnext
+								// We replace the users list with our clients
+								newUsers := make([]interface{}, 0, len(clients))
+								for _, c := range clients {
+									u := map[string]interface{}{
+										"id":         c.ID,
+										"encryption": "none",
+									}
+									// Add flow if not xhttp? Or always?
+									// Check outbound streamSettings
+									includeFlow := true
+									if ss, ok := outbound["streamSettings"].(map[string]interface{}); ok {
+										if net, _ := ss["network"].(string); net == "xhttp" {
+											includeFlow = false
+										}
+									}
+									if includeFlow {
+										flow := c.Flow
+										if flow == "" {
+											flow = DefaultFlow
+										}
+										u["flow"] = flow
+									}
+									newUsers = append(newUsers, u)
+								}
+								vnextMap["users"] = newUsers
+								vnext[j] = vnextMap
+							}
+							settings["vnext"] = vnext
+							outbound["settings"] = settings
+							outboundsSlice[i] = outbound
+							updated = true
+						}
+					}
+				}
+			}
+			if updated {
+				root["outbounds"] = outboundsSlice
+			}
+		}
 	}
 
-	settingsMap, ok := settingsValue.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("template inbound settings has unexpected type %T", settingsValue)
-	}
-
-	// We overwrite the clients list
-	settingsMap["clients"] = clientObjects
-	inbound["settings"] = settingsMap
-	inboundsSlice[0] = inbound
-	root["inbounds"] = inboundsSlice
 	return nil
 }
 
