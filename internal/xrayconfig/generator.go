@@ -100,7 +100,10 @@ func (g Generator) Render(clients []Client) ([]byte, error) {
 	}
 
 	// Execute Template
-	tmpl, err := template.New("xray").Parse(string(rawBase))
+	tmpl := template.New("xray").Funcs(template.FuncMap{
+		"UUID": func() string { return data.UUID },
+	})
+	tmpl, err = tmpl.Parse(string(rawBase))
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
 	}
