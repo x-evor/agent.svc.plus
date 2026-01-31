@@ -1,4 +1,4 @@
-BINARY_NAME=agent-svc-plus
+ BINARY_NAME=agent-svc-plus
 INSTALL_BIN=/usr/local/bin/$(BINARY_NAME)
 SERVICE_NAME=agent-svc-plus
 
