@@ -147,5 +147,6 @@ func (c *Client) ReportStatus(ctx context.Context, report agentproto.StatusRepor
 
 func (c *Client) applyHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Service-Token", c.token)
 	req.Header.Set("User-Agent", c.userAgent)
 }

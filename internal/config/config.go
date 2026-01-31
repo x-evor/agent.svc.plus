@@ -74,5 +74,13 @@ func LoadReader(r io.Reader) (*Config, error) {
 	if err := yaml.NewDecoder(r).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+
+	if authURL := os.Getenv("AuthUrl"); authURL != "" {
+		cfg.Agent.ControllerURL = authURL
+	}
+	if token := os.Getenv("INTERNAL_SERVICE_TOKEN"); token != "" {
+		cfg.Agent.APIToken = token
+	}
+
 	return &cfg, nil
 }
