@@ -105,7 +105,11 @@ func Run(ctx context.Context, opts Options) error {
 			continue
 		}
 
-		generator := xrayconfig.Generator{Definition: xrayconfig.DefaultDefinition(), OutputPath: outputPath}
+		generator := xrayconfig.Generator{
+			Definition: xrayconfig.DefaultDefinition(),
+			OutputPath: outputPath,
+			Domain:     opts.Agent.Domain,
+		}
 		if templatePath := strings.TrimSpace(target.TemplatePath); templatePath != "" {
 			payload, err := os.ReadFile(templatePath)
 			if err != nil {

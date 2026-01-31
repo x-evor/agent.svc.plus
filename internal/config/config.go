@@ -24,6 +24,7 @@ type Agent struct {
 	ID             string        `yaml:"id"`
 	ControllerURL  string        `yaml:"controllerUrl"`
 	APIToken       string        `yaml:"apiToken"`
+	Domain         string        `yaml:"domain"`
 	HTTPTimeout    time.Duration `yaml:"httpTimeout"`
 	StatusInterval time.Duration `yaml:"statusInterval"`
 	SyncInterval   time.Duration `yaml:"syncInterval"`
@@ -80,6 +81,9 @@ func LoadReader(r io.Reader) (*Config, error) {
 	}
 	if token := os.Getenv("INTERNAL_SERVICE_TOKEN"); token != "" {
 		cfg.Agent.APIToken = token
+	}
+	if domain := os.Getenv("DOMAIN"); domain != "" {
+		cfg.Agent.Domain = domain
 	}
 
 	return &cfg, nil

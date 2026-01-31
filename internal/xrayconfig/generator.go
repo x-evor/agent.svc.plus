@@ -39,6 +39,9 @@ type Generator struct {
 	// FileMode controls the permissions for the generated file. When zero it
 	// defaults to 0644.
 	FileMode fs.FileMode
+
+	// Domain is the hostname used to interpolate templates (e.g. for cert paths).
+	Domain string
 }
 
 // Generate writes a new Xray configuration with the provided clients. The base
