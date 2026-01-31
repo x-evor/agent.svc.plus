@@ -6,9 +6,11 @@ SERVICE_NAME=agent-svc-plus
 
 all: build
 
+export PATH := $(PATH):/usr/local/go/bin
+
 build:
-	go mod tidy
-	go build -o $(BINARY_NAME) ./cmd/agent
+	/usr/local/go/bin/go mod tidy
+	/usr/local/go/bin/go build -o $(BINARY_NAME) ./cmd/agent
 
 install: build
 	install -m 755 $(BINARY_NAME) $(INSTALL_BIN)
