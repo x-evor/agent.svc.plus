@@ -350,14 +350,14 @@ fi
 
 if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
     echo "Found certificate at: \$SOURCE_CRT"
-    # Keep /etc/ssl/agent as a fallback copy, but point Xray to the real source.
+    # Copy certificates into a stable local path readable by xray-tcp user.
     cp "\$SOURCE_CRT" "\$TARGET_CRT"
     cp "\$SOURCE_KEY" "\$TARGET_KEY"
-    update_xray_config "\$SOURCE_CRT" "\$SOURCE_KEY"
-    
     chown nobody:nogroup /etc/ssl/agent/svc.plus.*
     chmod 644 "\$TARGET_CRT"
     chmod 600 "\$TARGET_KEY"
+    update_xray_config "\$TARGET_CRT" "\$TARGET_KEY"
+    
     echo "Certificates successfully synced to /etc/ssl/agent/"
     systemctl restart xray-tcp || true
 else
