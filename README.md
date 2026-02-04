@@ -13,24 +13,37 @@
 
 Deploy `agent.svc.plus` with a single command. This script sets up Xray, Caddy, Go, and the Agent service.
 
+> Note: `scripts/init_vhost.sh` is kept as a compatibility shim and now forwards to `scripts/setup-proxy.sh`.
+
 * 默认当前主机名作为域名*
 
-```
-curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/init_vhost.sh | bash
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | bash
 ```
 
 ### Default Installation
 Installs the latest stable version and uses the current system hostname as the domain.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/init_vhost.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | bash
 ```
 
 ### Custom Domain Installation
 Specify a custom domain if your hostname is not configured or you wish to use a different one.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/init_vhost.sh | bash -s xhttp.example.com
+curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | \
+  bash -s -- --node xhttp.example.com
+```
+
+### Controller Registration (recommended)
+Pass controller URL and token via env so the node can register immediately:
+
+```bash
+AUTH_URL=https://accounts-svc-plus-266500572462.asia-northeast1.run.app \
+INTERNAL_SERVICE_TOKEN=replace-with-token \
+curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | \
+  bash -s -- --node hk-xhttp.svc.plus
 ```
 
 ## Configuration
