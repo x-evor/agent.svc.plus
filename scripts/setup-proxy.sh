@@ -200,7 +200,6 @@ caddy version
 echo -e "${GREEN}[4/7] Setting up configuration directories...${NC}"
 mkdir -p /usr/local/etc/xray
 mkdir -p /etc/caddy
-mkdir -p /etc/ssl/agent
 mkdir -p /etc/agent
 
 # 5. Agent Installation
@@ -271,9 +270,10 @@ echo -e "${GREEN}[6/7] Configuration Caddyfile...${NC}"
 # Check for existing Certbot certificates to reuse
 LE_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 LE_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+CADDY_CERT_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}"
 TLS_CONFIG=""
-XRAY_CERT="/etc/ssl/agent/svc.plus.pem"
-XRAY_KEY="/etc/ssl/agent/svc.plus.key"
+XRAY_CERT="${CADDY_CERT_DIR}/${DOMAIN}.crt"
+XRAY_KEY="${CADDY_CERT_DIR}/${DOMAIN}.key"
 
 if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
     echo "Found existing Certbot certificates. usage: Direct."
@@ -289,14 +289,15 @@ if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
     chmod -R +r /etc/letsencrypt/archive/${DOMAIN}
     chmod -R +r /etc/letsencrypt/live/${DOMAIN}
 else
-    echo "No existing Certbot certificates found at $LE_CERT. Will rely on Caddy auto-issuance."
+    echo "No existing Certbot certificates found at $LE_CERT. Xray TCP will use Caddy-managed cert path: $XRAY_CERT"
 fi
 
 # Ensure Xray TCP template + config always match the chosen cert paths
 sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1${XRAY_CERT}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
 sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1${XRAY_KEY}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
 cp /usr/local/etc/xray/templates/xray.tcp.template.json /usr/local/etc/xray/tcp-config.json
-chown nobody:nogroup /usr/local/etc/xray/tcp-config.json
+chown caddy:caddy /usr/local/etc/xray/tcp-config.json
+chmod 0644 /usr/local/etc/xray/tcp-config.json
 echo "Updated Xray TCP template/config to use: ${XRAY_CERT}"
 
 cat > /etc/caddy/Caddyfile <<EOF
@@ -320,91 +321,6 @@ ${DOMAIN}:443 {
 }
 EOF
 
-# Help script for syncing certificates
-cat > /usr/local/bin/sync-agent-certs <<EOF
-#!/bin/bash
-# Syncs certificates from Caddy or Certbot to Agent folder
-
-# Ensure destination directory exists and is accessible
-mkdir -p /etc/ssl/agent
-chmod 755 /etc/ssl/agent
-
-DOMAIN="${DOMAIN}"
-TARGET_CRT="/etc/ssl/agent/svc.plus.pem"
-TARGET_KEY="/etc/ssl/agent/svc.plus.key"
-
-# Priority 1: Certbot / Let's Encrypt Standard Path
-LE_CERT="/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem"
-LE_KEY="/etc/letsencrypt/live/\${DOMAIN}/privkey.pem"
-
-update_xray_config() {
-    local crt="\$1"
-    local key="\$2"
-    sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${crt}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
-    sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${key}\\2|g" /usr/local/etc/xray/templates/xray.tcp.template.json
-    sed -i -E "s|(\"certificateFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${crt}\\2|g" /usr/local/etc/xray/tcp-config.json
-    sed -i -E "s|(\"keyFile\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\\1\${key}\\2|g" /usr/local/etc/xray/tcp-config.json
-}
-
-if [ -f "\$LE_CERT" ] && [ -f "\$LE_KEY" ]; then
-    echo "Found Certbot certificates at \$LE_CERT"
-    # If using Certbot, we might assume Xray is already configured to point there directly (via init script).
-    # But if Xray is expecting /etc/ssl/agent/svc.plus.pem (default config), we should symlink or copy them here too as a fallback.
-    echo "Copying to agent dir as fallback..."
-    cp "\$LE_CERT" "\$TARGET_CRT"
-    cp "\$LE_KEY" "\$TARGET_KEY"
-    SOURCE_CRT="\$LE_CERT"
-    SOURCE_KEY="\$LE_KEY"
-else
-    # Priority 2: Caddy Internal Storage
-    SEARCH_PATHS="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/\${DOMAIN} /var/lib/caddy /root /etc/caddy /usr/share/caddy"
-
-    echo "Starting search for Caddy certificates..."
-
-    # Retry loop (ACME issuing takes time if not using pre-existing certs)
-    MAX_RETRIES=30
-    SLEEP_SEC=2
-
-    for ((i=1; i<=MAX_RETRIES; i++)); do
-        for DIR in \${SEARCH_PATHS}; do
-            if [ -d "\$DIR" ]; then
-                # Find closest match file named exactly \${DOMAIN}.crt
-                FOUND_CRT=\$(find "\$DIR" -name "\${DOMAIN}.crt" 2>/dev/null | head -n 1)
-                
-                if [ -n "\$FOUND_CRT" ]; then
-                    FOUND_KEY="\${FOUND_CRT%.crt}.key"
-                    if [ -f "\$FOUND_KEY" ]; then
-                        SOURCE_CRT="\$FOUND_CRT"
-                        SOURCE_KEY="\$FOUND_KEY"
-                        break 2
-                    fi
-                fi
-            fi
-        done
-        echo "Attempt \$i/\$MAX_RETRIES: Certificate not found yet. Waiting \$SLEEP_SEC seconds..."
-        sleep \$SLEEP_SEC
-    done
-fi
-
-if [ -n "\$SOURCE_CRT" ] && [ -f "\$SOURCE_CRT" ]; then
-    echo "Found certificate at: \$SOURCE_CRT"
-    # Copy certificates into a stable local path readable by xray-tcp user.
-    cp "\$SOURCE_CRT" "\$TARGET_CRT"
-    cp "\$SOURCE_KEY" "\$TARGET_KEY"
-    chown nobody:nogroup /etc/ssl/agent/svc.plus.*
-    chmod 644 "\$TARGET_CRT"
-    chmod 600 "\$TARGET_KEY"
-    update_xray_config "\$TARGET_CRT" "\$TARGET_KEY"
-    
-    echo "Certificates successfully synced to /etc/ssl/agent/"
-    systemctl restart xray-tcp || true
-else
-    echo "TIMED OUT: Could not find certificate for \${DOMAIN}"
-    exit 1
-fi
-EOF
-chmod +x /usr/local/bin/sync-agent-certs
-
 # 7. Systemd Services
 echo -e "${GREEN}[7/7] Installing Systemd Services...${NC}"
 
@@ -419,10 +335,10 @@ systemctl stop caddy || true
 
 # Permissions for config dir
 mkdir -p /usr/local/etc/xray
-chown -R nobody:nogroup /usr/local/etc/xray
-
-# Attempt immediate sync
-/usr/local/bin/sync-agent-certs || true
+chown -R root:root /usr/local/etc/xray
+chmod -R a+rX /usr/local/etc/xray
+# Legacy helper is no longer needed after switching to direct cert paths.
+rm -f /usr/local/bin/sync-agent-certs
 
 # Xray Service (XHTTP/Default)
 cat > /etc/systemd/system/xray.service <<EOF
@@ -455,7 +371,7 @@ Documentation=https://github.com/xtls
 After=network.target nss-lookup.target
 
 [Service]
-User=nobody
+User=caddy
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
@@ -492,8 +408,17 @@ systemctl enable xray-tcp
 systemctl enable caddy
 systemctl enable agent-svc-plus
 systemctl restart xray || true
-systemctl restart xray-tcp || true
 systemctl restart caddy || true
+
+if [ ! -f "$LE_CERT" ] || [ ! -f "$LE_KEY" ]; then
+    for i in $(seq 1 30); do
+        if [ -f "$XRAY_CERT" ] && [ -f "$XRAY_KEY" ]; then
+            break
+        fi
+        sleep 2
+    done
+fi
+systemctl restart xray-tcp || true
 
 if [ -n "$AUTH_URL" ] && [ -n "$INTERNAL_SERVICE_TOKEN" ]; then
     systemctl restart agent-svc-plus
