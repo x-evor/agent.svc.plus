@@ -12,7 +12,7 @@ echo -e "${GREEN}Starting Agent Service Plus Installation...${NC}"
 usage() {
     cat <<EOF
 Usage:
-  $0 --node <domain> [--auth-url <url>] [--internal-service-token <token>]
+  $0 [--upgrade-only|--upgrade] [--node <domain>] [--auth-url <url>] [--internal-service-token <token>]
 
 Env (optional):
   AUTH_URL
@@ -26,12 +26,17 @@ Examples:
   INTERNAL_SERVICE_TOKEN=xxxx \\
   curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | \\
     bash -s -- --node hk-xhttp.svc.plus
+
+  # Upgrade binaries only (no config overwrite)
+  curl -fsSL https://raw.githubusercontent.com/cloud-neutral-toolkit/agent.svc.plus/main/scripts/setup-proxy.sh | \\
+    bash -s -- --upgrade-only
 EOF
 }
 
 DOMAIN=""
 AUTH_URL="${AUTH_URL:-}"
 INTERNAL_SERVICE_TOKEN="${INTERNAL_SERVICE_TOKEN:-}"
+UPGRADE_ONLY=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -57,6 +62,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --internal-service-token=*)
             INTERNAL_SERVICE_TOKEN="${1#*=}"
+            shift
+            ;;
+        --upgrade-only|--upgrade)
+            UPGRADE_ONLY=true
             shift
             ;;
         -h|--help)
@@ -92,13 +101,20 @@ if [ -z "$DOMAIN" ]; then
 fi
 
 echo -e "${GREEN}Using node domain: ${DOMAIN}${NC}"
+if [ "$UPGRADE_ONLY" = true ]; then
+    echo -e "${YELLOW}Running in upgrade-only mode: configuration files will not be overwritten.${NC}"
+fi
 if [ -n "$AUTH_URL" ]; then
     echo -e "${GREEN}Using AUTH_URL: ${AUTH_URL}${NC}"
 fi
 
 # 1. System Update & Dependencies
-echo -e "${GREEN}[1/7] Updating system and installing dependencies...${NC}"
-apt-get update && apt-get install -y curl wget git socat build-essential debian-keyring debian-archive-keyring apt-transport-https dnsutils
+if [ "$UPGRADE_ONLY" = true ]; then
+    echo -e "${YELLOW}[1/7] Upgrade mode: skipping apt dependency install.${NC}"
+else
+    echo -e "${GREEN}[1/7] Updating system and installing dependencies...${NC}"
+    apt-get update && apt-get install -y curl wget git socat build-essential debian-keyring debian-archive-keyring apt-transport-https dnsutils
+fi
 
 # 2. Xray Installation
 echo -e "${GREEN}[2/7] Installing Xray...${NC}"
@@ -155,15 +171,20 @@ fi
 version_lt() { test "$(echo "$@" | tr " " "\n" | sort -rV | head -n 1)" != "$1"; }
 
 INSTALLED_CADDY_VER="0.0.0"
+CADDY_HAS_L4=false
 if command -v caddy &> /dev/null; then
     INSTALLED_CADDY_VER=$(caddy version | awk '{print $1}' | sed 's/v//')
+    if caddy list-modules 2>/dev/null | grep -q '^layer4'; then
+        CADDY_HAS_L4=true
+    fi
 fi
 
 REQUIRED_VER="2.8.0"
 echo "Installed Caddy Version: $INSTALLED_CADDY_VER"
+echo "Caddy L4 Module Present: $CADDY_HAS_L4"
 
-if version_lt "$INSTALLED_CADDY_VER" "$REQUIRED_VER"; then
-    echo -e "${YELLOW}Caddy is missing or older than v${REQUIRED_VER}. Building/Upgrading...${NC}"
+if [ "$UPGRADE_ONLY" = true ] || version_lt "$INSTALLED_CADDY_VER" "$REQUIRED_VER" || [ "$CADDY_HAS_L4" != true ]; then
+    echo -e "${YELLOW}Building/Upgrading Caddy with required plugins...${NC}"
     xcaddy build \
         --with github.com/caddy-dns/cloudflare \
         --with github.com/caddy-dns/alidns \
@@ -201,6 +222,22 @@ fi
 echo "Building Agent binary..."
 go mod tidy
 go build -o /usr/local/bin/agent-svc-plus ./cmd/agent
+
+if [ "$UPGRADE_ONLY" = true ]; then
+    echo -e "${GREEN}[upgrade-only] Restarting services to apply new binaries...${NC}"
+    systemctl restart xray || true
+    systemctl restart xray-tcp || true
+    systemctl restart caddy || true
+    systemctl restart agent-svc-plus || true
+
+    echo -e "${GREEN}Upgrade Complete!${NC}"
+    echo -e "Service states:"
+    echo -e "  - xray: $(systemctl is-active xray || echo unknown)"
+    echo -e "  - xray-tcp: $(systemctl is-active xray-tcp || echo unknown)"
+    echo -e "  - caddy: $(systemctl is-active caddy || echo unknown)"
+    echo -e "  - agent-svc-plus: $(systemctl is-active agent-svc-plus || echo unknown)"
+    exit 0
+fi
 
 # Copy default config if not exists, but don't overwrite user config
 mkdir -p /etc/agent
