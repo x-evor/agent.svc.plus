@@ -84,65 +84,102 @@ func NewClient(baseURL, token string, opts ClientOptions) (*Client, error) {
 
 // ListClients fetches the current set of Xray clients from the controller.
 func (c *Client) ListClients(ctx context.Context) (agentproto.ClientListResponse, error) {
-	endpoint, err := url.JoinPath(c.baseURL.String(), "/api/agent-server/v1/users")
-	if err != nil {
-		return agentproto.ClientListResponse{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return agentproto.ClientListResponse{}, err
-	}
-	c.applyHeaders(req)
-	req.Header.Set("Accept", "application/json")
+	paths := []string{"/api/agent-server/v1/users", "/api/agent/v1/users"}
+	var lastErr error
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return agentproto.ClientListResponse{}, err
-	}
-	defer resp.Body.Close()
+	for _, path := range paths {
+		endpoint, err := url.JoinPath(c.baseURL.String(), path)
+		if err != nil {
+			return agentproto.ClientListResponse{}, err
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
-		return agentproto.ClientListResponse{}, fmt.Errorf("controller returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return agentproto.ClientListResponse{}, err
+		}
+		c.applyHeaders(req)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
+			_ = resp.Body.Close()
+			err = fmt.Errorf("controller returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			if resp.StatusCode == http.StatusNotFound {
+				lastErr = err
+				continue
+			}
+			return agentproto.ClientListResponse{}, err
+		}
+
+		var payload agentproto.ClientListResponse
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		_ = resp.Body.Close()
+		if err != nil {
+			return agentproto.ClientListResponse{}, fmt.Errorf("decode client list: %w", err)
+		}
+		return payload, nil
 	}
 
-	var payload agentproto.ClientListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return agentproto.ClientListResponse{}, fmt.Errorf("decode client list: %w", err)
+	if lastErr != nil {
+		return agentproto.ClientListResponse{}, lastErr
 	}
-	return payload, nil
+	return agentproto.ClientListResponse{}, errors.New("controller users endpoint is unavailable")
 }
 
 // ReportStatus submits the agent status report to the controller.
 func (c *Client) ReportStatus(ctx context.Context, report agentproto.StatusReport) error {
-	endpoint, err := url.JoinPath(c.baseURL.String(), "/api/agent-server/v1/status")
-	if err != nil {
-		return err
-	}
-
 	buf, err := json.Marshal(report)
 	if err != nil {
 		return fmt.Errorf("encode status report: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return err
-	}
-	c.applyHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	paths := []string{"/api/agent-server/v1/status", "/api/agent/v1/status"}
+	var lastErr error
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	for _, path := range paths {
+		endpoint, err := url.JoinPath(c.baseURL.String(), path)
+		if err != nil {
+			return err
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
-		return fmt.Errorf("controller returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+		if err != nil {
+			return err
+		}
+		c.applyHeaders(req)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
+			_ = resp.Body.Close()
+			err = fmt.Errorf("controller returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			if resp.StatusCode == http.StatusNotFound {
+				lastErr = err
+				continue
+			}
+			return err
+		}
+
+		_ = resp.Body.Close()
+		return nil
 	}
-	return nil
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("controller status endpoint is unavailable")
 }
 
 func (c *Client) applyHeaders(req *http.Request) {
