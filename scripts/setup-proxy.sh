@@ -105,7 +105,7 @@ echo -e "${GREEN}[2/7] Installing Xray...${NC}"
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
 # 3. Go & Caddy Installation
-echo -e "${GREEN}[3/7] Installing Go and building Caddy with DNS plugins...${NC}"
+echo -e "${GREEN}[3/7] Installing Go and building Caddy with DNS + L4 plugins...${NC}"
 
 # Install Go
 if ! command -v go &> /dev/null; then
@@ -167,6 +167,7 @@ if version_lt "$INSTALLED_CADDY_VER" "$REQUIRED_VER"; then
     xcaddy build \
         --with github.com/caddy-dns/cloudflare \
         --with github.com/caddy-dns/alidns \
+        --with github.com/mholt/caddy-l4 \
         --output /usr/bin/caddy
 else
     echo -e "${GREEN}Caddy is up to date (v$INSTALLED_CADDY_VER). Skipping build.${NC}"
