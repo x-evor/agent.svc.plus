@@ -65,6 +65,7 @@ func Run(ctx context.Context, opts Options) error {
 		Timeout:            httpTimeout,
 		InsecureSkipVerify: opts.Agent.TLS.InsecureSkipVerify,
 		UserAgent:          buildUserAgent(opts.Agent.ID),
+		AgentID:            opts.Agent.ID,
 	})
 	if err != nil {
 		return err

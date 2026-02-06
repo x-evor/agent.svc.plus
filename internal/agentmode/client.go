@@ -22,6 +22,7 @@ type ClientOptions struct {
 	Timeout            time.Duration
 	InsecureSkipVerify bool
 	UserAgent          string
+	AgentID            string
 }
 
 // Client issues authenticated requests against the controller.
@@ -30,6 +31,7 @@ type Client struct {
 	token     string
 	http      *http.Client
 	userAgent string
+	agentID   string
 }
 
 // NewClient constructs a client for the provided controller URL and token.
@@ -79,12 +81,13 @@ func NewClient(baseURL, token string, opts ClientOptions) (*Client, error) {
 		token:     token,
 		http:      client,
 		userAgent: userAgent,
+		agentID:   strings.TrimSpace(opts.AgentID),
 	}, nil
 }
 
 // ListClients fetches the current set of Xray clients from the controller.
 func (c *Client) ListClients(ctx context.Context) (agentproto.ClientListResponse, error) {
-	paths := []string{"/api/agent-server/v1/users"}
+	paths := []string{"/api/agent-server/v1/users", "/api/agent/v1/users"}
 	var lastErr error
 
 	for _, path := range paths {
@@ -139,7 +142,7 @@ func (c *Client) ReportStatus(ctx context.Context, report agentproto.StatusRepor
 		return fmt.Errorf("encode status report: %w", err)
 	}
 
-	paths := []string{"/api/agent-server/v1/status"}
+	paths := []string{"/api/agent-server/v1/status", "/api/agent/v1/status"}
 	var lastErr error
 
 	for _, path := range paths {
@@ -185,5 +188,8 @@ func (c *Client) ReportStatus(ctx context.Context, report agentproto.StatusRepor
 func (c *Client) applyHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("X-Service-Token", c.token)
+	if c.agentID != "" {
+		req.Header.Set("X-Agent-ID", c.agentID)
+	}
 	req.Header.Set("User-Agent", c.userAgent)
 }
