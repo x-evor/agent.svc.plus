@@ -84,7 +84,7 @@ func NewClient(baseURL, token string, opts ClientOptions) (*Client, error) {
 
 // ListClients fetches the current set of Xray clients from the controller.
 func (c *Client) ListClients(ctx context.Context) (agentproto.ClientListResponse, error) {
-	paths := []string{"/api/agent-server/v1/users", "/api/agent/v1/users"}
+	paths := []string{"/api/agent-server/v1/users"}
 	var lastErr error
 
 	for _, path := range paths {
@@ -139,7 +139,7 @@ func (c *Client) ReportStatus(ctx context.Context, report agentproto.StatusRepor
 		return fmt.Errorf("encode status report: %w", err)
 	}
 
-	paths := []string{"/api/agent-server/v1/status", "/api/agent/v1/status"}
+	paths := []string{"/api/agent-server/v1/status"}
 	var lastErr error
 
 	for _, path := range paths {
