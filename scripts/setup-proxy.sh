@@ -16,7 +16,7 @@ STANDALONE_UUID_FILE="/usr/local/etc/xray/standalone.uuid"
 CLOUDFLARE_ZONE_NAME="${CLOUDFLARE_ZONE_NAME:-svc.plus}"
 CLOUDFLARE_API_BASE="https://api.cloudflare.com/client/v4"
 GITHUB_REPO="${GITHUB_REPO:-cloud-neutral-toolkit/agent.svc.plus}"
-AGENT_RELEASE_TAG="${AGENT_RELEASE_TAG:-latest}"
+AGENT_RELEASE_TAG="${AGENT_RELEASE_TAG:-v0.1.2}"
 AGENT_RELEASE_BASE_URL="https://github.com/${GITHUB_REPO}/releases"
 
 is_truthy() {
