@@ -35,9 +35,10 @@ func main() {
 	logger.Info("starting agent", "id", cfg.Agent.ID)
 
 	opts := agentmode.Options{
-		Logger: logger,
-		Agent:  cfg.Agent,
-		Xray:   cfg.Xray,
+		Logger:  logger,
+		Agent:   cfg.Agent,
+		Xray:    cfg.Xray,
+		Billing: cfg.Billing,
 	}
 
 	if err := agentmode.Run(ctx, opts); err != nil {

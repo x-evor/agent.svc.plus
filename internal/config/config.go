@@ -10,10 +10,11 @@ import (
 )
 
 type Config struct {
-	Mode  string `yaml:"mode"`
-	Log   Log    `yaml:"log"`
-	Agent Agent  `yaml:"agent"`
-	Xray  Xray   `yaml:"xray"`
+	Mode    string  `yaml:"mode"`
+	Log     Log     `yaml:"log"`
+	Agent   Agent   `yaml:"agent"`
+	Xray    Xray    `yaml:"xray"`
+	Billing Billing `yaml:"billing"`
 }
 
 type Log struct {
@@ -42,6 +43,14 @@ type TLS struct {
 
 type Xray struct {
 	Sync XraySync `yaml:"sync"`
+}
+
+type Billing struct {
+	Enabled           bool          `yaml:"enabled"`
+	BaseURL           string        `yaml:"baseURL"`
+	HTTPTimeout       time.Duration `yaml:"httpTimeout"`
+	CollectInterval   time.Duration `yaml:"collectInterval"`
+	ReconcileInterval time.Duration `yaml:"reconcileInterval"`
 }
 
 type XraySync struct {
@@ -89,6 +98,9 @@ func LoadReader(r io.Reader) (*Config, error) {
 	}
 	if domain := os.Getenv("DOMAIN"); domain != "" {
 		cfg.Agent.Domain = domain
+	}
+	if billingURL := os.Getenv("BILLING_SERVICE_BASE_URL"); billingURL != "" {
+		cfg.Billing.BaseURL = billingURL
 	}
 
 	return &cfg, nil

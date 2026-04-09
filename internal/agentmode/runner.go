@@ -17,9 +17,10 @@ import (
 
 // Options configures the agent runtime.
 type Options struct {
-	Logger *slog.Logger
-	Agent  config.Agent
-	Xray   config.Xray
+	Logger  *slog.Logger
+	Agent   config.Agent
+	Xray    config.Xray
+	Billing config.Billing
 }
 
 // Run launches the agent mode control loop. It blocks until the context is
@@ -59,6 +60,31 @@ func Run(ctx context.Context, opts Options) error {
 	httpTimeout := opts.Agent.HTTPTimeout
 	if httpTimeout <= 0 {
 		httpTimeout = 15 * time.Second
+	}
+
+	if opts.Billing.Enabled {
+		billingTimeout := opts.Billing.HTTPTimeout
+		if billingTimeout <= 0 {
+			billingTimeout = httpTimeout
+		}
+		collectInterval := opts.Billing.CollectInterval
+		if collectInterval <= 0 {
+			collectInterval = time.Minute
+		}
+		reconcileInterval := opts.Billing.ReconcileInterval
+		if reconcileInterval <= 0 {
+			reconcileInterval = 5 * time.Minute
+		}
+
+		billingClient, err := NewBillingClient(opts.Billing.BaseURL, billingTimeout)
+		if err != nil {
+			return err
+		}
+		startBillingSchedulers(ctx, billingClient, billingScheduleConfig{
+			httpTimeout:       billingTimeout,
+			collectInterval:   collectInterval,
+			reconcileInterval: reconcileInterval,
+		}, logger)
 	}
 
 	client, err := NewClient(controllerURL, token, ClientOptions{

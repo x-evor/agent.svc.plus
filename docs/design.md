@@ -1,7 +1,7 @@
 # Agent Service Plus Design & Architecture
 
 ## Overview
-`agent.svc.plus` is a lightweight agent designed to run on a VM (Virtual Machine). It serves as the runtime for Xray, managing connectivity and configuration synchronization with the central `accounts.svc.plus` service.
+`agent.svc.plus` is a lightweight control agent designed to run on a VM (Virtual Machine). It serves as the runtime for Xray, managing connectivity and configuration synchronization with the central `accounts.svc.plus` service while leaving traffic metric translation and billing to separate services.
 
 ## Architecture
 
@@ -13,12 +13,13 @@
 ### Key Components
 
 1.  **Agent (Go Binary)**:
-    *   **Role**: Controller.
+    *   **Role**: Controller / orchestrator.
     *   **Responsibilities**:
         *   Authenticate with `accounts.svc.plus`.
         *   Fetch configuration (UUIDs, Routing rules).
         *   Generate Xray configuration files at `/usr/local/etc/xray/`.
         *   Reload `xray` services (`systemctl reload xray`, `systemctl reload xray-tcp`).
+        *   Schedule reconciliation jobs and future control actions.
 
 2.  **Xray (Proxy)**:
     *   **Mode 1: XHTTP (Split Mode)**:
@@ -34,6 +35,16 @@
     *   Handles ACME (Let's Encrypt/ZeroSSL) automatically.
     *   Reverse proxies `/split/*` to Xray via Unix socket.
 
+4.  **xray-exporter / billing-service (separate control plane utilities)**:
+    *   `xray-exporter` polls raw Xray stats and emits Prometheus metrics.
+    *   `billing-service` consumes minute-level traffic deltas and writes PostgreSQL billing rows.
+    *   `agent` may trigger or observe these jobs, but does not own their data model.
+
+## Acceptance
+
+See `docs/testing/agent-reconciliation-acceptance.md` for the orchestration-only
+acceptance checklist used by CRT-007.
+
 ## Interaction Flow
 
 1.  **Startup**:
@@ -45,7 +56,12 @@
     *   Endpoint: `GET /api/agent/sync` (or `GET /api/agent/config`).
     *   Payload includes: User UUIDs, Traffic limits (optional).
 
-3.  **Reconfiguration**:
+3.  **计费与观测边界**:
+    *   Xray 仅提供原始流量数据。
+    *   exporter 负责指标化，不参与计费。
+    *   PostgreSQL 负责计费真相源。
+
+4.  **Reconfiguration**:
     *   If config changes:
         *   Agent regenerates `config.json` and `tcp-config.json`.
         *   Agent executes reload command.

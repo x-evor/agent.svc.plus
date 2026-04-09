@@ -69,3 +69,23 @@
           - "'active (running)' in service_status.stdout"
         fail_msg: "Agent service is not running"
         success_msg: "Agent service is running"
+
+    - name: Get xray-exporter service status
+      ansible.builtin.command: systemctl status {{ xray_exporter_service_name }}
+      register: exporter_service_status
+      changed_when: false
+      ignore_errors: true
+      when: xray_exporter_enabled
+
+    - name: Display xray-exporter service status
+      ansible.builtin.debug:
+        var: exporter_service_status.stdout_lines
+      when: xray_exporter_enabled
+
+    - name: Verify xray-exporter is running
+      ansible.builtin.assert:
+        that:
+          - "'active (running)' in exporter_service_status.stdout"
+        fail_msg: "xray-exporter service is not running"
+        success_msg: "xray-exporter service is running"
+      when: xray_exporter_enabled
