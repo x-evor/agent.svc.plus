@@ -2,7 +2,7 @@
 
 ## Scope
 
-`agent.svc.plus` is the lightweight runtime agent that runs on a VM. It is not a traditional data service; it synchronizes Xray configuration, reports heartbeat/status, and bridges the node to `accounts.svc.plus`.
+`agent.svc.plus` is the lightweight runtime control service that runs on a VM. It is not a traditional data service; it synchronizes Xray configuration, reports heartbeat/status, schedules reconciliation jobs, and bridges the node to `accounts.svc.plus`.
 
 ## Architecture
 
@@ -15,8 +15,10 @@ flowchart TB
   Client["agentmode.Client\nHTTP client to controller"]
   Sync["xrayconfig periodic syncers"]
   Xray["xray-core"]
+  Exporter["xray-exporter"]
   Caddy["Caddy / TLS / ACME"]
   Accounts["accounts.svc.plus"]
+  Billing["billing-service"]
   AgentAPI["/api/agent-server/v1/users\n/api/agent-server/v1/status"]
   Edge["Optional Cloudflare Workers / container runtime"]
 
@@ -29,7 +31,10 @@ flowchart TB
   Sync --> Xray
   Sync --> Caddy
   Xray --> Caddy
+  Xray --> Exporter
+  Exporter --> Billing
   AgentAPI --> Accounts
+  Billing --> Accounts
   Edge --> AgentAPI
 ```
 
@@ -48,6 +53,8 @@ flowchart TB
 - Keep TLS certificates live via Caddy.
 - Poll accounts for client and node updates.
 - Report agent health and sync progress back to the controller.
+- Schedule billing reconciliation and future control actions without owning the billing source of truth.
+- Leave traffic metric translation to the separate exporter layer.
 
 ## Data / Storage Notes
 

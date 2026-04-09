@@ -13,6 +13,7 @@ XRAY_TCP_USER="caddy"
 OPEN_STUNNEL_5443="${OPEN_STUNNEL_5443:-false}"
 STANDALONE_MODE=false
 STANDALONE_UUID_FILE="/usr/local/etc/xray/standalone.uuid"
+AGENT_DATA_DIR="${AGENT_DATA_DIR:-/opt/agent.svc.plus}"
 CLOUDFLARE_ZONE_NAME="${CLOUDFLARE_ZONE_NAME:-svc.plus}"
 CLOUDFLARE_API_BASE="https://api.cloudflare.com/client/v4"
 GITHUB_REPO="${GITHUB_REPO:-cloud-neutral-toolkit/agent.svc.plus}"
@@ -767,6 +768,11 @@ systemctl stop caddy || true
 mkdir -p /usr/local/etc/xray
 chown -R root:root /usr/local/etc/xray
 chmod -R a+rX /usr/local/etc/xray
+if [ "$STANDALONE_MODE" != true ]; then
+    mkdir -p "${AGENT_DATA_DIR}"
+    chown root:root "${AGENT_DATA_DIR}"
+    chmod 0755 "${AGENT_DATA_DIR}"
+fi
 # Legacy helper is no longer needed after switching to direct cert paths.
 rm -f /usr/local/bin/sync-agent-certs
 
@@ -854,7 +860,7 @@ After=network.target
 ExecStart=/usr/local/bin/agent-svc-plus -config /etc/agent/account-agent.yaml
 Restart=always
 User=root
-WorkingDirectory=/opt/agent.svc.plus
+WorkingDirectory=${AGENT_DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target

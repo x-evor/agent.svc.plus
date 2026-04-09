@@ -1,6 +1,6 @@
 # Agent Service Plus
 
-`agent.svc.plus` is the lightweight runtime agent for the Cloud Neutral Toolkit. It manages Xray instances on Virtual Machines (VMs), handling configuration synchronization, traffic reporting, and certificate management via Caddy.
+`agent.svc.plus` is the lightweight runtime control agent for the Cloud Neutral Toolkit. It manages Xray instances on Virtual Machines (VMs), handling configuration synchronization, control-plane job scheduling, and certificate management via Caddy. Traffic metric translation and billing remain separate concerns.
 
 ## Features
 
@@ -8,6 +8,7 @@
 *   **Xray Management**: Automatically configures and reloads Xray (XHTTP & TCP modes).
 *   **Secure Communication**: Authenticated synchronization with `accounts.svc.plus`.
 *   **Automated TLS**: Integrated with Caddy for automatic HTTPS/Certificates.
+*   **Control Plane Hooks**: Reconciliation and future autoscaling actions can be triggered from the agent without making it the billing source of truth.
 
 ## 🚀 Quick Start (One-Shell)
 
