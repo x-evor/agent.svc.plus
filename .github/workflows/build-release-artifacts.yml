@@ -205,7 +205,7 @@ jobs:
       TARGET_HOST: ${{ needs.prep.outputs.target_host }}
       RUN_APPLY: ${{ needs.prep.outputs.run_apply }}
       INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
-      SSH_PRIVATE_KEY_FILE: /home/runner/.ssh/id_rsa
+      SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/deploy_ssh_key
       AGENT_VARS_FILE: deploy/ansible/vars/agent_svc_plus.yml
       ANSIBLE_CONFIG: deploy/ansible/ansible.cfg
     steps:
@@ -242,6 +242,7 @@ jobs:
             echo "Missing repository secret: DEPLOY_SSH_PRIVATE_KEY"
             exit 1
           fi
+          mkdir -p "$(dirname "${SSH_PRIVATE_KEY_FILE}")"
           install -d -m 700 /home/runner/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > "${SSH_PRIVATE_KEY_FILE}"
           chmod 600 "${SSH_PRIVATE_KEY_FILE}"
