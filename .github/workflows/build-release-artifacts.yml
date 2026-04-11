@@ -205,6 +205,7 @@ jobs:
       TARGET_HOST: ${{ needs.prep.outputs.target_host }}
       RUN_APPLY: ${{ needs.prep.outputs.run_apply }}
       INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+      SSH_PRIVATE_KEY_FILE: /home/runner/.ssh/id_rsa
       AGENT_VARS_FILE: deploy/ansible/vars/agent_svc_plus.yml
       ANSIBLE_CONFIG: deploy/ansible/ansible.cfg
     steps:
@@ -232,6 +233,19 @@ jobs:
             exit 1
           fi
 
+      - name: Install SSH private key
+        if: env.RUN_APPLY == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "${SSH_PRIVATE_KEY}" ]; then
+            echo "Missing repository secret: DEPLOY_SSH_PRIVATE_KEY"
+            exit 1
+          fi
+          install -d -m 700 /home/runner/.ssh
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > "${SSH_PRIVATE_KEY_FILE}"
+          chmod 600 "${SSH_PRIVATE_KEY_FILE}"
+
       - name: Build ad-hoc inventory
         if: env.RUN_APPLY == 'true'
         run: |
@@ -244,7 +258,6 @@ jobs:
           ansible_port=22
           ansible_host_key_checking=False
           ansible_ssh_common_args='-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-          ansible_ssh_private_key_file=~/.ssh/id_rsa
           EOF
 
       - name: Run remote validation
@@ -255,6 +268,7 @@ jobs:
           ansible-playbook -i .github/tmp/inventory.ci.ini .github/tmp/playbooks/deploy_agent_svc_plus.yml \
             -D -C \
             -l "${TARGET_HOST}" \
+            --private-key "${SSH_PRIVATE_KEY_FILE}" \
             -e "INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN}"
 
       - name: Validate build artifacts
