@@ -1,4 +1,5 @@
 .env
+/agent
 deploy/cloudflare/workers/node_modules/
 deploy/cloudflare/workers/.wrangler/
 deploy/cloudflare/containers/node_modules/

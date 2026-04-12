@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,9 +13,21 @@ import (
 	"agent.svc.plus/internal/config"
 )
 
+var (
+	serviceName = "agent-svc-plus"
+	gitCommit   = "unknown"
+	buildDate   = "unknown"
+)
+
 func main() {
 	configPath := flag.String("config", "account-agent.yaml", "path to configuration file")
+	showVersion := flag.Bool("v", false, "print version information and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("%s %s %s\n", serviceName, gitCommit, buildDate)
+		return
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
