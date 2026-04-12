@@ -214,7 +214,7 @@ jobs:
       RUN_APPLY: ${{ needs.prep.outputs.run_apply }}
       EXPECTED_BUILD_COMMIT: ${{ needs.prep.outputs.git_commit_short }}
       INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
-      SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/deploy_ssh_key
+      SSH_PRIVATE_KEY_FILE: /tmp/deploy_ssh_key
       AGENT_VARS_FILE: deploy/ansible/vars/agent_svc_plus.yml
       ANSIBLE_CONFIG: deploy/ansible/ansible.cfg
     steps:
